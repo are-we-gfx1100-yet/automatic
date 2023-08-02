@@ -111,7 +111,7 @@ lora = Map({
 process = Map({
     # general settings, do not modify
     'format': '.jpg', # image format
-    'target_size': 512, # target resolution
+    'target_size': 768, # target resolution
     'segmentation_model': 0, # segmentation model 0/general 1/landscape
     'segmentation_background': (192, 192, 192), # segmentation background color
     'blur_score': 1.8, # max score for face blur detection
