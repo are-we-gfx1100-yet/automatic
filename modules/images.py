@@ -236,8 +236,10 @@ def resize_image(resize_mode, im, width, height, upscaler_name=None):
         return im
 
     if resize_mode == 0:
-        res = resize(im, width, height)
+        res = im.copy()
     elif resize_mode == 1:
+        res = resize(im, width, height)
+    elif resize_mode == 2:
         ratio = width / height
         src_ratio = im.width / im.height
         src_w = width if ratio > src_ratio else im.width * height // im.height
@@ -443,6 +445,8 @@ def atomically_save_image():
         except Exception:
             shared.log.warning(f'Unknown image format: {extension}')
             image_format = 'JPEG'
+        if shared.opts.image_watermark_enabled:
+            image = set_watermark(image, shared.opts.image_watermark)
         shared.log.debug(f'Saving image: {image_format} {fn} {image.size}')
         # actual save
         exifinfo = (exifinfo or "") if shared.opts.image_metadata else ""
@@ -483,14 +487,8 @@ def atomically_save_image():
         with open(os.path.join(paths.data_path, "params.txt"), "w", encoding="utf8") as file:
             file.write(exifinfo)
         if shared.opts.save_log_fn != '' and len(exifinfo) > 0:
-            try:
-                with open(os.path.join(paths.data_path, shared.opts.save_log_fn), mode='a+', encoding='utf-8') as f:
-                    entry = { 'filename': filename, 'time': datetime.datetime.now().isoformat(), 'info': exifinfo }
-                    json.dump(entry, f)
-                    f.write(os.linesep)
-                    shared.log.debug(f'Log file updated: {os.path.join(paths.data_path, shared.opts.save_log_fn)}')
-            except Exception as e:
-                shared.log.warning(f'Failed to save log file: {shared.opts.save_log_fn} {e}')
+            entry = { 'filename': filename, 'time': datetime.datetime.now().isoformat(), 'info': exifinfo }
+            shared.writefile(entry, os.path.join(paths.data_path, shared.opts.save_log_fn), mode='a+')
         save_queue.task_done()
 
 
@@ -535,7 +533,7 @@ def save_image(image, path, basename, seed=None, prompt=None, extension='jpg', i
         return None, None
     if not check_grid_size([image]):
         return None, None
-    if path is None: # set default path to avoid errors when functions are triggered manually or via api and param is not set
+    if path is None or len(path) == 0: # set default path to avoid errors when functions are triggered manually or via api and param is not set
         path = shared.opts.outdir_save
     namegen = FilenameGenerator(p, seed, prompt, image)
     if save_to_dirs is None:
@@ -566,7 +564,10 @@ def save_image(image, path, basename, seed=None, prompt=None, extension='jpg', i
                 if not os.path.exists(fullfn):
                     break
         else:
-            fullfn = os.path.join(path, f"{file_decoration}.{extension}")
+            if basename == '':
+                fullfn = os.path.join(path, f"{file_decoration}.{extension}")
+            else:
+                fullfn = os.path.join(path, f"{basename}-{file_decoration}.{extension}")
     else:
         fullfn = os.path.join(path, f"{forced_filename}.{extension}")
     pnginfo = existing_info or {}
@@ -586,7 +587,7 @@ def save_image(image, path, basename, seed=None, prompt=None, extension='jpg', i
         params.filename = filename + extension
     txt_fullfn = f"{filename}.txt" if shared.opts.save_txt and len(exifinfo) > 0 else None
 
-    save_queue.put((params.image, filename, extension, params, exifinfo, txt_fullfn))
+    save_queue.put((params.image, filename, extension, params, exifinfo, txt_fullfn)) # actual save is executed in a thread that polls data from queue
     save_queue.join()
     # atomically_save_image(params.image, filename, extension, params, exifinfo, txt_fullfn)
 
@@ -643,6 +644,10 @@ def read_info_from_image(image):
                             items[ExifTags.TAGS[key]] = val
                     elif val is not None and key in ExifTags.GPSTAGS:
                         items[ExifTags.GPSTAGS[key]] = val
+    wm = get_watermark(image)
+    if wm != '':
+        # geninfo += f' Watermark: {wm}'
+        items['watermark'] = wm
 
     for key, val in items.items():
         if isinstance(val, bytes): # decode bytestring
@@ -696,3 +701,40 @@ def flatten(img, bgcolor):
         background.paste(img, mask=img)
         img = background
     return img.convert('RGB')
+
+
+def set_watermark(image, watermark):
+    from imwatermark import WatermarkEncoder
+    wm_type = 'bytes'
+    wm_method = 'dwtDctSvd'
+    wm_length = 32
+    length = wm_length // 8
+    info = image.info
+    data = np.asarray(image)
+    encoder = WatermarkEncoder()
+    text = f"{watermark:<{length}}"[:length]
+    bytearr = text.encode(encoding='ascii', errors='ignore')
+    try:
+        encoder.set_watermark(wm_type, bytearr)
+        encoded = encoder.encode(data, wm_method)
+        image = Image.fromarray(encoded)
+        image.info = info
+        shared.log.debug(f'Set watermark: {watermark} method={wm_method} bits={wm_length}')
+    except Exception as e:
+        shared.log.warning(f'Set watermark error: {watermark} method={wm_method} bits={wm_length} {e}')
+    return image
+
+
+def get_watermark(image):
+    from imwatermark import WatermarkDecoder
+    wm_type = 'bytes'
+    wm_method = 'dwtDctSvd'
+    wm_length = 32
+    data = np.asarray(image)
+    decoder = WatermarkDecoder(wm_type, wm_length)
+    try:
+        decoded = decoder.decode(data, wm_method)
+        wm = decoded.decode(encoding='ascii', errors='ignore')
+    except Exception:
+        wm = ''
+    return wm

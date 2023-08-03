@@ -4,40 +4,61 @@
 
 Stuff to be fixed, in no particular order...
 
-- SD-XL VAE
-- SD-XL Lora
-- SD-XL Sketch/Inpaint
-- Kandinsky 2.2 (2.1 is working)
-- Misterious Extensions auto-enabling
-- Misterious Extra network corruptions
-- script_callbacks.on_model_loaded
+- Mysterious Extra network corruptions
+- Unet type mismatch/autocast issues on some platforms
 
 ## Features
 
 Stuff to be added, in no particular order...
 
-- Update `Wiki`
-- Create new `GitHub` hooks/actions for CI/CD  
-- Import core repos
-- Update `train.py` to use `interrogator`
-- Update `train.py` to use `rembg`
-- Create new **Lora** train UI
-- Docker PR
-- Port `p.all_hr_prompts`
-- Image watermark using `image-watermark`
-- Image phash and hdash using `imagehash`
-- Model merge using `git-rebasin`
-- Additional upscalers
-- XYZ grid upscalers
-- New image browser
-- Update `gradio`
-- Rename repo: **automatic** -> **sdnext**
-- New icons
-- Enable refiner workflow for `ldm` backend
-- Improve `lyco` logging
-- Cache models when switching backends
-- Style editor
-- Built-in motd-style notifications
+- Diffusers:
+  - Add SD-XL Lora
+  - Add ControlNet
+  - Fix SD-XL Img2img/Inpaint
+  - Add SD and SD-XL Pix2Pix
+  - Add VAE direct load from safetensors
+  - Fix Kandinsky 2.2 model
+  - Fix DeepFloyd IF model
+  - Redo Prompt parser for diffusers
+  - Add unCLIP model
+  - Add ToMe support
+  - Add Training support
+- Technical debt:
+  - Port **A1111** stuff
+  - Port `p.all_hr_prompts`
+  - Import core repos to reduce dependencies
+  - Update `gradio`
+- Non-technical:
+  - Create additional themes
+  - Update Wiki
+  - Get more high-quality upscalers
+  - Rename repo: **automatic** -> **sdnext**
+  - [Localization](https://app.transifex.com/signup/open-source/)
+- New Minor
+  - Prompt padding for positive/negative
+  - XYZ grid upscalers
+  - Built-in `motd`-style notifications
+  - Docker PR
+- New Major
+  - Style editor (use json format instead of csv)
+  - Profile manager (for config.json and ui-config.json)
+  - Multi-user support
+  - Image phash and hdash using `imagehash`
+  - Model merge using `git-rebasin`
+  - Enable refiner-style workflow for `ldm` backend
+  - Add `sgm` backend
+  - Cache models in VRAM
+  - Train:
+    - Use `interrogator`
+    - Use `rembg`
+    - Templates for SD-XL training
+    - Lora train UI
+- Redesign
+  - New UI
+  - New inpainting canvas controls (move from backend to purely frontend)
+  - New image browser (move from backend to purely frontend)
+  - New extra networks (move from backend to purely frontend)
+  - Change workflows from static/legacy to steps-based
 
 ## Investigate
 
@@ -54,19 +75,15 @@ Pick & merge PRs from main repo...
 
 Tech that can be integrated as part of the core workflow...
 
-- [Merge without distortion](https://github.com/ogkalu2/Merge-Stable-Diffusion-models-without-distortion)
-- [Weighted merges](https://github.com/bbc-mc/sdweb-merge-block-weighted-gui/tree/master)
+- [Git-ReBasin]([https://github.com/ogkalu2/Merge-Stable-Diffusion-models-without-distortion](https://github.com/vladmandic/automatic/issues/1176))
 - [Null-text inversion](https://github.com/ouhenio/null-text-inversion-colab)
 - [Custom diffusion](https://github.com/guaneec/custom-diffusion-webui), [Custom diffusion](https://www.cs.cmu.edu/~custom-diffusion/)
 - [Dream artist](https://github.com/7eu7d7/DreamArtist-sd-webui-extension)
 - [QuickEmbedding](https://github.com/ethansmith2000/QuickEmbedding)
-- [DataComp CLiP](https://github.com/mlfoundations/open_clip/blob/main/docs/datacomp_models.md)
-- [ClipSeg](https://github.com/timojl/clipseg)
 - [DragGAN](https://github.com/XingangPan/DragGAN)
-- [LamaCleaner]([Title](https://github.com/Sanster/lama-cleaner))
+- [LamaCleaner](https://github.com/Sanster/lama-cleaner)
 - `TensorRT`
 
 ## Random
 
 - Bunch of stuff: <https://pharmapsychotic.com/tools.html>
-- <https://towardsdatascience.com/mastering-memoization-in-python-dcdd8b435189>

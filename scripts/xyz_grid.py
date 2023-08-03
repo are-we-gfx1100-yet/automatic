@@ -205,7 +205,7 @@ class AxisOptionTxt2Img(AxisOption):
 
 axis_options = [
     AxisOption("Nothing", str, do_nothing, fmt=format_nothing),
-    AxisOption("Checkpoint name", str, apply_checkpoint, fmt=format_value, cost=1.0, choices=lambda: list(sd_models.checkpoints_list)),
+    AxisOption("Checkpoint name", str, apply_checkpoint, fmt=format_value, cost=1.0, choices=lambda: sorted(sd_models.checkpoints_list)),
     AxisOption("VAE", str, apply_vae, cost=0.7, choices=lambda: ['None'] + list(sd_vae.vae_dict)),
     AxisOption("Dict name", str, apply_dict, fmt=format_value, cost=1.0, choices=lambda: ['None'] + list(sd_models.checkpoints_list)),
     AxisOption("Prompt S/R", str, apply_prompt, fmt=format_value),
@@ -239,10 +239,7 @@ axis_options = [
     AxisOption("SecondPass Steps", int, apply_field("hr_second_pass_steps")),
     AxisOption("SecondPass CFG Scale", float, apply_field("image_cfg_scale")),
     AxisOption("SecondPass Guidance Rescale", float, apply_field("diffusers_guidance_rescale")),
-    AxisOption("SecondPass Denoise Start", float, apply_field("refiner_denoise_start")),
-    AxisOption("SecondPass Denoise End", float, apply_field("refiner_denoise_end")),
-
-
+    AxisOption("SecondPass Refiner Start", float, apply_field("refiner_start")),
 ]
 
 
@@ -263,7 +260,6 @@ def draw_xyz_grid(p, xs, ys, zs, x_labels, y_labels, z_labels, cell, draw_legend
         shared.state.job = f"{index(ix, iy, iz) + 1} out of {list_size}"
         processed: Processed = cell(x, y, z, ix, iy, iz)
         if processed_result is None:
-            # Use our first processed result object as a template container to hold our full results
             processed_result = copy(processed)
             processed_result.images = [None] * list_size
             processed_result.all_prompts = [None] * list_size
@@ -272,7 +268,6 @@ def draw_xyz_grid(p, xs, ys, zs, x_labels, y_labels, z_labels, cell, draw_legend
             processed_result.index_of_first_image = 1
         idx = index(ix, iy, iz)
         if processed.images:
-            # Non-empty list indicates some degree of success.
             processed_result.images[idx] = processed.images[0]
             processed_result.all_prompts[idx] = processed.prompt
             processed_result.all_seeds[idx] = processed.seed
@@ -282,7 +277,6 @@ def draw_xyz_grid(p, xs, ys, zs, x_labels, y_labels, z_labels, cell, draw_legend
             cell_size = (processed_result.width, processed_result.height)
             if processed_result.images[0] is not None:
                 cell_mode = processed_result.images[0].mode
-                #This corrects size in case of batches:
                 cell_size = processed_result.images[0].size
             processed_result.images[idx] = Image.new(cell_mode, cell_size)
 
@@ -318,7 +312,6 @@ def draw_xyz_grid(p, xs, ys, zs, x_labels, y_labels, z_labels, cell, draw_legend
                         process_cell(x, y, z, ix, iy, iz)
 
     if not processed_result:
-        # Should never happen, I've only seen it on one of four open tabs and it needed to refresh.
         shared.log.error("XYZ grid: Processing could not begin, you may need to refresh the tab or restart the service")
         return Processed(p, [])
     elif not any(processed_result.images):

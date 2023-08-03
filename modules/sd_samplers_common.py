@@ -3,11 +3,12 @@ import numpy as np
 import torch
 from PIL import Image
 from modules import devices, processing, images, sd_vae_approx, sd_samplers, sd_vae_taesd
-
 from modules.shared import opts, state
 import modules.shared as shared
 
+
 SamplerData = namedtuple('SamplerData', ['name', 'constructor', 'aliases', 'options'])
+approximation_indexes = {"Full VAE": 0, "Approximate NN": 1, "Approximate simple": 2, "TAESD": 3}
 
 
 def setup_img2img_steps(p, steps=None):
@@ -20,9 +21,6 @@ def setup_img2img_steps(p, steps=None):
         t_enc = int(min(p.denoising_strength, 0.999) * steps)
 
     return steps, t_enc
-
-
-approximation_indexes = {"Full VAE": 0, "Approximate NN": 1, "Approximate simple": 2, "TAESD": 3}
 
 
 def single_sample_to_image(sample, approximation=None):
@@ -59,10 +57,13 @@ def store_latent(decoded):
         if not shared.parallel_processing_allowed:
             shared.state.assign_current_image(sample_to_image(decoded))
 
+
 def is_sampler_using_eta_noise_seed_delta(p):
     """returns whether sampler from config will use eta noise seed delta for image creation"""
     sampler_config = sd_samplers.find_sampler_config(p.sampler_name)
     eta = p.eta
+    if not hasattr(p.sampler, "eta"):
+        return False
     if eta is None and p.sampler is not None:
         eta = p.sampler.eta
     if eta is None and sampler_config is not None:

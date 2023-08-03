@@ -9,9 +9,10 @@ from enum import Enum
 import gradio as gr
 import tqdm
 import requests
+import fasteners
 from modules import errors, ui_components, shared_items, cmd_args
 from modules.paths_internal import models_path, script_path, data_path, sd_configs_path, sd_default_config, sd_model_file, default_sd_model_file, extensions_dir, extensions_builtin_dir # pylint: disable=W0611
-from modules.dml import directml_hijack_init, directml_override_opts
+from modules.dml import memory_providers, default_memory_provider, directml_do_hijack
 import modules.interrogate
 import modules.memmon
 import modules.styles
@@ -64,18 +65,6 @@ restricted_opts = {
     "outdir_save",
     "outdir_init_images"
 }
-ui_reorder_categories = [
-    "inpaint",
-    "sampler",
-    "dimensions",
-    "cfg",
-    "seed",
-    "batch",
-    "checkboxes",
-    "second_pass",
-    "override_settings",
-    "scripts",
-]
 
 
 def is_url(string):
@@ -181,10 +170,13 @@ class State:
         if self.current_latent is None:
             return
         import modules.sd_samplers # pylint: disable=W0621
-        if opts.show_progress_grid:
-            self.assign_current_image(modules.sd_samplers.samples_to_image_grid(self.current_latent))
-        else:
-            self.assign_current_image(modules.sd_samplers.sample_to_image(self.current_latent))
+        try:
+            if opts.show_progress_grid:
+                self.assign_current_image(modules.sd_samplers.samples_to_image_grid(self.current_latent))
+            else:
+                self.assign_current_image(modules.sd_samplers.sample_to_image(self.current_latent))
+        except Exception:
+            pass
         self.current_image_sampling_step = self.sampling_step
 
     def assign_current_image(self, image):
@@ -248,11 +240,18 @@ def refresh_checkpoints():
     import modules.sd_models # pylint: disable=W0621
     return modules.sd_models.list_models()
 
+def refresh_vaes():
+    import modules.sd_vae # pylint: disable=W0621
+    modules.sd_vae.refresh_vae_list()
 
 def list_samplers():
     import modules.sd_samplers # pylint: disable=W0621
     modules.sd_samplers.set_samplers()
     return modules.sd_samplers.all_samplers
+
+def list_builtin_themes():
+    files = [os.path.splitext(f)[0] for f in os.listdir('javascript') if f.endswith('.css')]
+    return files
 
 def list_themes():
     fn = os.path.join('html', 'themes.json')
@@ -263,8 +262,9 @@ def list_themes():
             res = json.loads(f.read())
     else:
         res = []
-    builtin = ["black-orange", "gradio/default", "gradio/base", "gradio/glass", "gradio/monochrome", "gradio/soft"]
-    themes = sorted(set(builtin + [x['id'] for x in res if x['status'] == 'RUNNING' and 'test' not in x['id'].lower()]), key=str.casefold)
+    list_builtin_themes()
+    builtin = list_builtin_themes() + ["gradio/default", "gradio/base", "gradio/glass", "gradio/monochrome", "gradio/soft"]
+    themes = sorted(builtin) + sorted({x['id'] for x in res if x['status'] == 'RUNNING' and 'test' not in x['id'].lower()}, key=str.casefold)
     return themes
 
 
@@ -293,6 +293,38 @@ def refresh_themes():
             log.error('Error refreshing UI themes')
     except Exception:
         log.error('Exception refreshing UI themes')
+
+
+def readfile(filename, silent=False):
+    data = {}
+    try:
+        if not os.path.exists(filename):
+            return {}
+        with fasteners.InterProcessLock(f"{filename}.lock"):
+            with open(filename, "r", encoding="utf8") as file:
+                data = json.load(file)
+            if not silent:
+                log.debug(f'Reading: {filename} len={len(data)}')
+    except Exception as e:
+        log.error(f'Reading failed: {filename} {e}')
+    return data
+
+
+def writefile(data, filename, mode='w'):
+
+    def default(obj):
+        log.error(f"Saving: {filename} not a valid object: {obj}")
+        return str(obj)
+
+    try:
+        with fasteners.InterProcessLock(f"{filename}.lock"):
+            # skipkeys=True, ensure_ascii=True, check_circular=True, allow_nan=True
+            output = json.dumps(data, indent=2, default=default)
+            log.debug(f'Saving: {filename} len={len(output)}')
+            with open(filename, mode, encoding="utf8") as file:
+                file.write(output)
+    except Exception as e:
+        log.error(f'Saving failed: {filename} {e}')
 
 
 if devices.backend == "cpu":
@@ -345,32 +377,39 @@ options_templates.update(options_section(('cuda', "Compute Settings"), {
     "no_half_vae": OptionInfo(False, "Use full precision for VAE (--no-half-vae)"),
     "upcast_sampling": OptionInfo(True if sys.platform == "darwin" else False, "Enable upcast sampling"),
     "upcast_attn": OptionInfo(False, "Enable upcast cross attention layer"),
+    "cuda_cast_unet": OptionInfo(False, "Use fixed UNet precision"),
     "disable_nan_check": OptionInfo(True, "Disable NaN check in produced images/latent spaces"),
     "rollback_vae": OptionInfo(False, "Attempt VAE roll back when produced NaN values (experimental)"),
     "opt_channelslast": OptionInfo(False, "Use channels last as torch memory format "),
     "cudnn_benchmark": OptionInfo(False, "Enable full-depth cuDNN benchmark feature"),
     "cuda_allow_tf32": OptionInfo(True, "Allow TF32 math ops"),
     "cuda_allow_tf16_reduced": OptionInfo(True, "Allow TF16 reduced precision math ops"),
-    "cuda_compile": OptionInfo(False, "Enable model compile (experimental)"),
-    "cuda_compile_mode": OptionInfo("none", "Model compile mode (experimental)", gr.Radio, lambda: {"choices": ['none', 'inductor', 'reduce-overhead', 'cudagraphs', 'aot_ts_nvfuser', 'hidet', 'ipex']}),
+    "cuda_compile": OptionInfo(True if devices.backend == "ipex" else False, "Enable model compile (experimental)"),
+    "cuda_compile_mode": OptionInfo("ipex" if devices.backend == "ipex" else "none", "Model compile mode (experimental)", gr.Radio, lambda: {"choices": ['none', 'inductor', 'reduce-overhead', 'cudagraphs', 'aot_ts_nvfuser', 'hidet', 'ipex']}),
     "cuda_compile_fullgraph": OptionInfo(False, "Model compile fullgraph"),
     "cuda_compile_verbose": OptionInfo(False, "Model compile verbose mode"),
     "cuda_compile_errors": OptionInfo(True, "Model compile suppress errors"),
     "disable_gc": OptionInfo(True, "Disable Torch memory garbage collection"),
+    "directml_memory_provider": OptionInfo(default_memory_provider, '[DirectML] Memory stats provider', gr.Dropdown, lambda: {"choices": memory_providers}),
 }))
 
 options_templates.update(options_section(('diffusers', "Diffusers Settings"), {
     "diffusers_allow_safetensors": OptionInfo(True, 'Diffusers allow loading from safetensors files'),
-    "diffusers_pipeline": OptionInfo(pipelines[0], 'Select diffuser pipeline when loading from safetensors', gr.Dropdown, lambda: {"choices": pipelines}),
+    "diffusers_pipeline": OptionInfo(pipelines[0], 'Diffusers pipeline', gr.Dropdown, lambda: {"choices": pipelines}),
+    "diffusers_refiner_latents": OptionInfo(True, "Use latents when using refiner"),
     "diffusers_move_base": OptionInfo(False, "Move base model to CPU when using refiner"),
     "diffusers_move_refiner": OptionInfo(True, "Move refiner model to CPU when not in use"),
+    "diffusers_move_unet": OptionInfo(False, "Move UNet to CPU while VAE decoding"),
     "diffusers_extract_ema": OptionInfo(True, "Use model EMA weights when possible"),
     "diffusers_generator_device": OptionInfo("default", "Generator device", gr.Radio, lambda: {"choices": ["default", "cpu"]}),
     "diffusers_seq_cpu_offload": OptionInfo(False, "Enable sequential CPU offload"),
     "diffusers_model_cpu_offload": OptionInfo(False, "Enable model CPU offload"),
-    "diffusers_vae_slicing": OptionInfo(False, "Enable VAE slicing"),
+    "diffusers_vae_upcast": OptionInfo("default", "VAE upcasting", gr.Radio, lambda: {"choices": ['default', 'true', 'false']}),
+    "diffusers_vae_slicing": OptionInfo(True, "Enable VAE slicing"),
     "diffusers_vae_tiling": OptionInfo(False, "Enable VAE tiling"),
     "diffusers_attention_slicing": OptionInfo(False, "Enable attention slicing"),
+    "diffusers_model_load_variant": OptionInfo("default", "Diffusers model loading variant", gr.Radio, lambda: {"choices": ['default', 'fp32', 'fp16']}),
+    "diffusers_vae_load_variant": OptionInfo("default", "Diffusers VAE loading variant", gr.Radio, lambda: {"choices": ['default', 'fp32', 'fp16']}),
     # "diffusers_force_zeros": OptionInfo(False, "Force zeros for prompts when empty"),
     # "diffusers_aesthetics_score": OptionInfo(6.0, "Require aesthetic score", gr.Slider, {"minimum": 0, "maximum": 10, "step": 0.1}),
 }))
@@ -401,6 +440,8 @@ options_templates.update(options_section(('saving-images', "Image Options"), {
     "samples_save": OptionInfo(True, "Always save all generated images"),
     "samples_format": OptionInfo('jpg', 'File format for generated images', gr.Dropdown, lambda: {"choices": ["jpg", "png", "webp", "tiff", "jp2"]}),
     "image_metadata": OptionInfo(True, "Include metadata in saved images"),
+    "image_watermark_enabled": OptionInfo(False, "Include watermark in saved images"),
+    "image_watermark": OptionInfo('', "Image watermark string"),
     "samples_filename_pattern": OptionInfo("[seq]-[prompt_words]", "Images filename pattern", component_args=hide_dirs),
     "directories_max_prompt_words": OptionInfo(8, "Max prompt words for [prompt_words] pattern", gr.Slider, {"minimum": 1, "maximum": 99, "step": 1, **hide_dirs}),
     "save_images_add_number": OptionInfo(True, "Add number to filename when saving", component_args=hide_dirs),
@@ -413,8 +454,9 @@ options_templates.update(options_section(('saving-images', "Image Options"), {
     "n_rows": OptionInfo(-1, "Grid row count", gr.Slider, {"minimum": -1, "maximum": 16, "step": 1}),
     "save_txt": OptionInfo(False, "Create text file next to every image with generation parameters"),
     "save_log_fn": OptionInfo("", "Create JSON log file for each saved image", component_args=hide_dirs),
-    "save_images_before_face_restoration": OptionInfo(False, "Save copy of image before doing face restoration"),
     "save_images_before_highres_fix": OptionInfo(False, "Save copy of image before applying highres fix"),
+    "save_images_before_refiner": OptionInfo(False, "Save copy of image before running refiner"),
+    "save_images_before_face_restoration": OptionInfo(False, "Save copy of image before doing face restoration"),
     "save_images_before_color_correction": OptionInfo(False, "Save copy of image before applying color correction"),
     "save_mask": OptionInfo(False, "Save copy of the inpainting greyscale mask"),
     "save_mask_composite": OptionInfo(False, "Save copy of inpainting masked composite"),
@@ -471,7 +513,6 @@ options_templates.update(options_section(('ui', "User Interface"), {
     "hidden_tabs": OptionInfo([], "Hidden UI tabs", ui_components.DropdownMulti, lambda: {"choices": list(tab_names)}),
     "ui_tab_reorder": OptionInfo("From Text, From Image, Process Image", "UI tabs order"),
     "ui_scripts_reorder": OptionInfo("Enable Dynamic Thresholding, ControlNet", "UI scripts order"),
-    "ui_reorder": OptionInfo(", ".join(ui_reorder_categories), "txt2img/img2img UI item order"),
 }))
 
 options_templates.update(options_section(('live-preview', "Live Previews"), {
@@ -489,8 +530,8 @@ options_templates.update(options_section(('live-preview', "Live Previews"), {
 }))
 
 options_templates.update(options_section(('sampler-params', "Sampler Settings"), {
-    "show_samplers": OptionInfo(["Euler a", "UniPC", "DEIS", "DDIM", "DPM 1S", "DPM 2M", "DPM++ 2M SDE", "DPM++ 2M SDE Karras", "DPM2 Karras", "DPM++ 2M Karras"], "Show samplers in user interface", gr.CheckboxGroup, lambda: {"choices": [x.name for x in list_samplers() if x.name != "PLMS"]}),
-    "fallback_sampler": OptionInfo("Euler a", "Secondary sampler", gr.Dropdown, lambda: {"choices": ["None"] + [x.name for x in list_samplers()]}),
+    "show_samplers": OptionInfo(["Default", "Euler a", "UniPC", "DEIS", "DDIM", "DPM 1S", "DPM 2M", "DPM++ 2M SDE", "DPM++ 2M SDE Karras", "DPM2 Karras", "DPM++ 2M Karras"], "Show samplers in user interface", gr.CheckboxGroup, lambda: {"choices": [x.name for x in list_samplers() if x.name != "PLMS"]}),
+    # "fallback_sampler": OptionInfo("Euler a", "Secondary sampler", gr.Dropdown, lambda: {"choices": ["None"] + [x.name for x in list_samplers()]}),
     # "force_latent_sampler": OptionInfo("None", "Force latent upscaler sampler", gr.Dropdown, lambda: {"choices": ["None"] + [x.name for x in list_samplers()]}),
     'uni_pc_variant': OptionInfo("bh1", "UniPC variant", gr.Radio, {"choices": ["bh1", "bh2", "vary_coeff"]}),
     'uni_pc_skip_type': OptionInfo("time_uniform", "UniPC skip type", gr.Radio, {"choices": ["time_uniform", "time_quadratic", "logSNR"]}),
@@ -500,11 +541,13 @@ options_templates.update(options_section(('sampler-params', "Sampler Settings"),
 
     "schedulers_sep_diffusers": OptionInfo("<h2>Diffusers specific config</h2>", "", gr.HTML),
     "schedulers_prediction_type": OptionInfo("default", "Samplers override model prediction type", gr.Radio, lambda: {"choices": ['default', 'epsilon', 'sample', 'v-prediction']}),
-    "schedulers_beta_schedule": OptionInfo("default", "Samplers override beta schedule", gr.Radio, lambda: {"choices": ['default', 'linear', 'scaled_linear', 'squaredcos_cap_v2']}),
     "schedulers_use_karras": OptionInfo(True, "Samplers should use Karras sigmas where applicable"),
     "schedulers_use_loworder": OptionInfo(True, "Samplers should use use lower-order solvers in the final steps where applicable"),
     "schedulers_use_thresholding": OptionInfo(False, "Samplers should use dynamic thresholding where applicable"),
     "schedulers_dpm_solver": OptionInfo("sde-dpmsolver++", "Samplers DPM solver algorithm", gr.Radio, lambda: {"choices": ['dpmsolver', 'dpmsolver++', 'sde-dpmsolver++']}),
+    "schedulers_beta_schedule": OptionInfo("default", "Samplers override beta schedule", gr.Radio, lambda: {"choices": ['default', 'linear', 'scaled_linear', 'squaredcos_cap_v2']}),
+    'schedulers_beta_start': OptionInfo(0, "Samplers override beta start", gr.Number, {}),
+    'schedulers_beta_end': OptionInfo(0, "Samplers override beta end", gr.Number, {}),
 
     "schedulers_sep_kdiffusers": OptionInfo("<h2>K-Diffusion specific config</h2>", "", gr.HTML),
     "always_batch_cond_uncond": OptionInfo(False, "Disable conditional batching enabled on low memory systems"),
@@ -655,8 +698,13 @@ class Options:
         if cmd_opts.freeze:
             log.warning(f'Settings saving is disabled: {filename}')
             return
-        with open(filename, "w", encoding="utf8") as file:
-            json.dump(self.data, file, indent=4)
+        try:
+            output = json.dumps(self.data, indent=2)
+            log.debug(f'Saving settings: {filename} len={len(output)}')
+            with open(filename, "w", encoding="utf8") as file:
+                file.write(output)
+        except Exception as e:
+            log.error(f'Saving settings failed: {filename} {e}')
 
     def same_type(self, x, y):
         if x is None or y is None:
@@ -670,8 +718,7 @@ class Options:
             log.debug(f'Created default config: {filename}')
             self.save(filename)
             return
-        with open(filename, "r", encoding="utf8") as file:
-            self.data = json.load(file)
+        self.data = readfile(filename)
         if self.data.get('quicksettings') is not None and self.data.get('quicksettings_list') is None:
             self.data['quicksettings_list'] = [i.strip() for i in self.data.get('quicksettings').split(',')]
         bad_settings = 0
@@ -755,8 +802,7 @@ parallel_processing_allowed = not cmd_opts.lowvram
 mem_mon = modules.memmon.MemUsageMonitor("MemMon", device, opts)
 mem_mon.start()
 if devices.backend == "directml":
-    directml_hijack_init()
-    directml_override_opts()
+    directml_do_hijack()
 
 
 def reload_gradio_theme(theme_name=None):
@@ -776,7 +822,7 @@ def reload_gradio_theme(theme_name=None):
             'font':['Helvetica', 'ui-sans-serif', 'system-ui', 'sans-serif'],
             'font_mono':['IBM Plex Mono', 'ui-monospace', 'Consolas', 'monospace']
         }
-    if theme_name == "black-orange":
+    if theme_name in list_builtin_themes():
         gradio_theme = gr.themes.Default(**default_font_params)
     elif theme_name.startswith("gradio/"):
         if theme_name == "gradio/default":
@@ -843,8 +889,9 @@ def restart_server(restart=True):
         demo.close(verbose=False)
         demo.server.close()
         demo.fns = []
-    except Exception:
-        pass
+        # os._exit(0)
+    except Exception as e:
+        log.error(f'Server shutdown error: {e}')
     if restart:
         log.info('Server will restart')
 

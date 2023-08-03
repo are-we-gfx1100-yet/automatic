@@ -147,9 +147,13 @@ def installed(package, friendly: str = None):
                 version = pkg_resources.get_distribution(p[0]).version
                 # log.debug(f"Package version found: {p[0]} {version}")
                 if len(p) > 1:
-                    ok = ok and version == p[1]
-                    if not ok:
-                        log.warning(f"Package wrong version: {p[0]} {version} required {p[1]}")
+                    exact = version == p[1]
+                    ok = ok and (exact or args.experimental)
+                    if not exact:
+                        if args.experimental:
+                            log.warning(f"Package allowing experimental: {p[0]} {version} required {p[1]}")
+                        else:
+                            log.warning(f"Package wrong version: {p[0]} {version} required {p[1]}")
             else:
                 log.debug(f"Package version not found: {p[0]}")
         return ok
@@ -285,6 +289,9 @@ def check_python():
 def check_torch():
     if args.quick:
         return
+    if args.skip_torch:
+        log.info('Skipping Torch tests')
+        return
     if args.profile:
         pr = cProfile.Profile()
         pr.enable()
@@ -329,6 +336,7 @@ def check_torch():
         else:
             torch_command = os.environ.get('TORCH_COMMAND', 'torch==2.0.1 torchvision==0.15.2 --index-url https://download.pytorch.org/whl/rocm5.4.2')
 
+        os.environ.setdefault('TENSORFLOW_PACKAGE', 'tensorflow-rocm')
         xformers_package = os.environ.get('XFORMERS_PACKAGE', 'none')
     elif allow_ipex and (args.use_ipex or shutil.which('sycl-ls') is not None or os.environ.get('ONEAPI_ROOT') is not None or os.path.exists('/opt/intel/oneapi')):
         args.use_ipex = True # pylint: disable=attribute-defined-outside-init
@@ -337,6 +345,7 @@ def check_torch():
             log.error('Intel OneAPI Toolkit is not activated! Start the WebUI with --use-ipex or activate OneAPI manually')
         os.environ.setdefault('NEOReadDebugKeys', '1')
         os.environ.setdefault('ClDeviceGlobalMemSizeAvailablePercent', '100')
+        os.environ.setdefault('TENSORFLOW_PACKAGE', 'tensorflow==2.12.0 intel-extension-for-tensorflow[gpu]')
         torch_command = os.environ.get('TORCH_COMMAND', 'torch==1.13.0a0+git6c9b55e torchvision==0.14.1a0 intel_extension_for_pytorch==1.13.120+xpu -f https://developer.intel.com/ipex-whl-stable-xpu')
     else:
         machine = platform.machine()
@@ -352,8 +361,6 @@ def check_torch():
             torch_command = os.environ.get('TORCH_COMMAND', 'torch torchvision')
     if 'torch' in torch_command and not args.version:
         install(torch_command, 'torch torchvision')
-    if args.skip_torch:
-        log.info('Skipping Torch tests')
     else:
         try:
             import torch
@@ -401,11 +408,6 @@ def check_torch():
                 pip('uninstall xformers --yes --quiet', ignore=True, quiet=True)
     except Exception as e:
         log.debug(f'Cannot install xformers package: {e}')
-    try:
-        tensorflow_package = os.environ.get('TENSORFLOW_PACKAGE', 'tensorflow==2.12.0')
-        install(tensorflow_package, 'tensorflow', ignore=True)
-    except Exception as e:
-        log.debug(f'Cannot install tensorflow package: {e}')
     if opts.get('cuda_compile_mode', '') == 'hidet':
         install('hidet', 'hidet')
     if args.profile:
@@ -444,6 +446,8 @@ def install_packages():
     install(invisiblewatermark_package, 'invisible-watermark')
     install('onnxruntime==1.15.1', 'onnxruntime', ignore=True)
     install('pi-heif', 'pi_heif', ignore=True)
+    tensorflow_package = os.environ.get('TENSORFLOW_PACKAGE', 'tensorflow==2.12.0')
+    install(tensorflow_package, 'tensorflow', ignore=True)
     if args.profile:
         print_profile(pr, 'Packages')
 
@@ -503,17 +507,12 @@ def run_extension_installer(folder):
         log.error(f'Exception running extension installer: {e}')
 
 # get list of all enabled extensions
-def list_extensions(folder, quiet=False):
+def list_extensions_folder(folder, quiet=False):
     name = os.path.basename(folder)
     disabled_extensions_all = opts.get('disable_all_extensions', 'none')
     if disabled_extensions_all != 'none':
-        if not quiet:
-            log.info(f'Disabled {name}: {disabled_extensions_all}')
         return []
     disabled_extensions = opts.get('disabled_extensions', [])
-    if len(disabled_extensions) > 0:
-        if not quiet:
-            log.info(f'Disabled {name}: {disabled_extensions}')
     enabled_extensions = [x for x in os.listdir(folder) if x not in disabled_extensions and not x.startswith('.')]
     if not quiet:
         log.info(f'Enabled {name}: {enabled_extensions}')
@@ -535,7 +534,7 @@ def install_extensions():
     for folder in extension_folders:
         if not os.path.isdir(folder):
             continue
-        extensions = list_extensions(folder, quiet=True)
+        extensions = list_extensions_folder(folder, quiet=True)
         log.debug(f'Extensions all: {extensions}')
         for ext in extensions:
             if ext in extensions_enabled:
@@ -637,21 +636,25 @@ def set_environment():
     os.environ.setdefault('NUMEXPR_MAX_THREADS', '16')
     os.environ.setdefault('PYTHONHTTPSVERIFY', '0')
     os.environ.setdefault('HF_HUB_DISABLE_TELEMETRY', '1')
+    os.environ.setdefault('HF_HUB_DISABLE_EXPERIMENTAL_WARNING', '1')
     os.environ.setdefault('UVICORN_TIMEOUT_KEEP_ALIVE', '60')
     if sys.platform == 'darwin':
         os.environ.setdefault('PYTORCH_ENABLE_MPS_FALLBACK', '1')
 
 
 def check_extensions():
-    if args.quick:
-        return 0
     newest_all = os.path.getmtime('requirements.txt')
     from modules.paths_internal import extensions_builtin_dir, extensions_dir
     extension_folders = [extensions_builtin_dir] if args.safe else [extensions_builtin_dir, extensions_dir]
+    disabled_extensions_all = opts.get('disable_all_extensions', 'none')
+    if disabled_extensions_all != 'none':
+        log.info(f'Disabled extensions: {disabled_extensions_all}')
+    else:
+        log.info(f'Disabled extensions: {opts.get("disabled_extensions", [])}')
     for folder in extension_folders:
         if not os.path.isdir(folder):
             continue
-        extensions = list_extensions(folder)
+        extensions = list_extensions_folder(folder)
         for ext in extensions:
             newest = 0
             extension_dir = os.path.join(folder, ext)

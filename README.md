@@ -9,71 +9,83 @@
 [![](https://img.shields.io/static/v1?label=Sponsor&message=%E2%9D%A4&logo=GitHub&color=%23fe8e86)](https://github.com/sponsors/vladmandic)
 ![Last Commit](https://img.shields.io/github/last-commit/vladmandic/automatic?svg=true)
 ![License](https://img.shields.io/github/license/vladmandic/automatic?svg=true)
-![GitHub Status Checks](https://img.shields.io/github/checks-status/vladmandic/automatic/main?svg=true)
 [![Discord](https://img.shields.io/discord/1101998836328697867?logo=Discord&svg=true)](https://discord.gg/VjvR2tabEX)
 
-### [Docs](README.md#docs) | [Discord](https://discord.gg/VjvR2tabEX) | [Changelog](CHANGELOG.md)
+### [Wiki](https://github.com/vladmandic/automatic/wiki) | [Discord](https://discord.gg/VjvR2tabEX) | [Changelog](CHANGELOG.md)
 
 </div>
 
-This project started as a fork from [Automatic1111 WebUI](https://github.com/AUTOMATIC1111/stable-diffusion-webui/) and it grew significantly since then, but although it diverged considerably, any substantial features to original work is ported to this repository as well.
+This project started as a fork from [Automatic1111 WebUI](https://github.com/AUTOMATIC1111/stable-diffusion-webui/) and it grew significantly since then,  
+but although it diverged considerably, any substantial features to original work is ported to this repository as well.
 
-## Top-10 Differentiators
+## Top-13 Features (10 wasn't enough)
 
-All Individual features are not listed here, instead check [Changelog](CHANGELOG.md) for full list of changes.
+All Individual features are not listed here, instead check [ChangeLog](CHANGELOG.md) for full list of changes.
 
-- Optimized backend with latest **torch** developments  
-  Including built-in support for `torch.compile`  
-- Support for `diffusers` as well as standard `ldm` backend  
-  Support for diffusers includes multiple models other than standard **Stable Diffusion**  
-  such as **SD-XL**, **Kandinsky**, **DeepFloyd IF** (and many more in the near future)  
+- Optimized processing with latest **torch** developments  
+  Including built-in support for `torch.compile`
+- Support for multiple backends!  
+  **original** and **diffusers**
+- Support for multiple diffusion models!  
+  Stable Diffusion, SD-XL, Kandinsky, DeepFloyd IF, etc.  
 - Fully multiplatform with platform specific autodetection and tuning performed on install  
+  Windows / Linux / MacOS with CPU / nVidia / AMD / IntelArc / DirectML
 - Improved prompt parser  
-- Enhanced Lora/Locon/Lyco code supporting latest trends in training  
+- Enhanced *Lora*/*Locon*/*Lyco* code supporting latest trends in training  
 - Built-in queue management  
 - Advanced metadata caching and handling to speed up operations  
 - Enterprise level logging and hardened API  
 - Modern localization and hints engine  
-- Broad compatibility with extisting extensions ecosystem and new extensions manager  
+- Broad compatibility with existing extensions ecosystem and new extensions manager  
 - Built in installer with automatic updates and dependency management  
 - Modernized UI (still based on Gradio) with theme support  
+
+## Backend support
+
+**SD.Next** supports two main backends: *Original* and *Diffusers* which can be switched on-the-fly:
+
+- **Original**: Based on [LDM](https://github.com/Stability-AI/stablediffusion) reference implementation and significantly expanded on by [A1111](https://github.com/AUTOMATIC1111/stable-diffusion-webui)  
+  This is the default backend and it is fully compatible with all existing functionality and extensions  
+- **Diffusers**: Based on new [Huggingface Diffusers](https://huggingface.co/docs/diffusers/index) implementation  
+  It is also the only backend that supports **Stable Diffusion XL** model  
+  Support for legacy workflows and extensions is limited, but it's being expanded  
+  See [wiki article](https://github.com/vladmandic/automatic/wiki/Diffusers) for more information  
+
+## Model support
+
+Additional models will be added as they become available and there is public interest in them
+
+- Stable Diffusion 1.x and 2.x including all variants
+- Stable Diffusion XL
+- Kandinsky 2.1
+- DeepFloyd IF
+- UniDiffusion
 
 ## Platform support
 
 - *nVidia* GPUs using **CUDA** libraries on both *Windows and Linux*
-- *AMD* GPUs using **ROCm** libraries on *Linux*  
+- *AMD* GPUs using **ROCm** libraries on *Linux*.  
   Support will be extended to *Windows* once AMD releases ROCm for Windows
-- Any GPU compatibile with *DirectX* on *Windows* using **DirectML** libraries  
+- Any GPU compatibile with *DirectX* on *Windows* using **DirectML** libraries.  
   This includes support for AMD GPUs that are not supported by native ROCm libraries
 - *Intel Arc* GPUs using *Intel OneAPI* **Ipex/XPU** libraries  
 - *Apple M1/M2* on *OSX* using built-in support in Torch with **MPS** optimizations
 
-## Install
-
-1. Install first:  
-**Python** & **Git**  
-2. Clone repository  
-`git clone https://github.com/vladmandic/automatic`
-3. Run launcher  
-  `webui.bat` or `webui.sh`:  
-    - Platform specific wrapper scripts For Windows, Linux and OSX  
-    - Starts `sdnext.py` in a Python virtual environment (`venv`)  
-    - Uses `install.py` to handle all actual requirements and dependencies
-
+## [Installation Instructions](https://github.com/vladmandic/automatic/wiki/Installation)
 
 ### Common Problems
 
-- [Common Installation Errors](https://github.com/vladmandic/automatic/discussions/1627)  
+- [Common Installation Errors ](https://github.com/vladmandic/automatic/discussions/1627)  
 - [Q&A Discussions](https://github.com/vladmandic/automatic/discussions/1011)
 
 ### Installation Notes
 
 - Server can run without virtual environment,  
   but it is recommended to use it to avoid library version conflicts with other applications  
-- **nVidia/CUDA** and **AMD/ROCm** are auto-detected is present and available,  
+- **nVidia/CUDA** and **AMD/ROCm** are auto-detected if present and available,  
    but for any other use case specify required parameter explicitly or wrong packages may be installed  
-  as installer will assume CPU-only environment.
-- Full startup sequence is logged in `sdnext.log`, so if you encounter any issues, please check it first.
+  as installer will assume CPU-only environment  
+- Full startup sequence is logged in `sdnext.log`, so if you encounter any issues, please check it first  
 
 Below is partial list of all available parameters, run `webui --help` for the full list:
 
@@ -101,7 +113,7 @@ Below is partial list of all available parameters, run `webui --help` for the fu
 
 SD.Next comes with several extensions pre-installed:
 
-- [Dyanmic Thresholding](https://github.com/mcmonkeyprojects/sd-dynamic-thresholding)
+- [Dynamic Thresholding](https://github.com/mcmonkeyprojects/sd-dynamic-thresholding)
 - [ControlNet](https://github.com/Mikubill/sd-webui-controlnet)
 - [Agent Scheduler](https://github.com/ArtVentureX/sd-webui-agent-scheduler)
 - [Multi-Diffusion Tiled Diffusion and VAE](https://github.com/pkuliyi2015/multidiffusion-upscaler-for-automatic1111)
@@ -114,7 +126,7 @@ SD.Next comes with several extensions pre-installed:
 
 - To avoid having this repo rely just on me, I'd love to have additional maintainers with full admin rights. If you're interested, ping me!  
 - In addition to general cross-platform code, desire is to have a lead for each of the main platforms.
-This should be fully cross-platform, but I would really love to have additional contibutors and/or maintainers to join and help lead the efforts on different platforms.
+This should be fully cross-platform, but I would really love to have additional contributors and/or maintainers to join and help lead the efforts on different platforms.
 
 ### **Goals**
 
@@ -149,7 +161,13 @@ General goals:
 - [Wiki](https://github.com/vladmandic/automatic/wiki)
 - [ReadMe](README.md)
 - [ToDo](TODO.md)  
-- [Changelog](CHANGELOG.md)
+- [ChangeLog](CHANGELOG.md)
 - [CLI Tools](cli/README.md)
+
+### **Sponsors**
+
+<div align="center">
+<!-- sponsors --><a href="https://github.com/allangrant"><img src="https://github.com/allangrant.png" width="60px" alt="Allan Grant" /></a><a href="https://github.com/demib72"><img src="https://github.com/demib72.png" width="60px" alt="Michael Harris" /></a><a href="https://github.com/BrentOzar"><img src="https://github.com/BrentOzar.png" width="60px" alt="Brent Ozar" /></a><a href="https://github.com/AimwiseTonix"><img src="https://github.com/AimwiseTonix.png" width="60px" alt="ToniX" /></a><a href="https://github.com/inktomi"><img src="https://github.com/inktomi.png" width="60px" alt="Matthew Runo" /></a><a href="https://github.com/HELLO-WORLD-SAS"><img src="https://github.com/HELLO-WORLD-SAS.png" width="60px" alt="HELLO WORLD SAS" /></a><a href="https://github.com/4joeknight4"><img src="https://github.com/4joeknight4.png" width="60px" alt="" /></a><a href="https://github.com/SaladTechnologies"><img src="https://github.com/SaladTechnologies.png" width="60px" alt="Salad Technologies" /></a><!-- sponsors -->
+</div>
 
 <br>

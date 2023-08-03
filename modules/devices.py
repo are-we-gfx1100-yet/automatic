@@ -1,10 +1,8 @@
-import os
 import gc
 import sys
 import contextlib
 import torch
 from modules import cmd_args, shared, memstats
-from modules.dml import directml_init
 
 if sys.platform == "darwin":
     from modules import mac_specific # pylint: disable=ungrouped-imports
@@ -34,7 +32,7 @@ def get_cuda_device_string():
     elif backend == 'directml' and torch.dml.is_available():
         if shared.cmd_opts.device_id is not None:
             return f"privateuseone:{shared.cmd_opts.device_id}"
-        return torch.dml.get_default_device_string()
+        return torch.dml.get_device_string(torch.dml.default_device().index)
     else:
         if shared.cmd_opts.device_id is not None:
             return f"cuda:{shared.cmd_opts.device_id}"
@@ -68,20 +66,17 @@ def torch_gc(force=False):
     if oom > previous_oom:
         previous_oom = oom
         shared.log.warning(f'GPU out-of-memory error: {mem}')
-    if used > 90:
+    if used > 95:
         shared.log.warning(f'GPU high memory utilization: {used}% {mem}')
         force = True
+        if backend == "directml":
+            practical_used = round(100 * torch.cuda.memory_allocated() / (1 << 30) / gpu.get('total', 1))
+            shared.log.info(f'Practical GPU memory utilization: {practical_used}%')
 
     if shared.opts.disable_gc and not force:
         return
     collected = gc.collect()
-    if backend == 'ipex' and "WSL2" not in os.popen("uname -a").read():
-        try:
-            with torch.xpu.device(get_cuda_device_string()):
-                torch.xpu.empty_cache()
-        except Exception:
-            pass
-    elif cuda_ok:
+    if cuda_ok or backend == 'ipex':
         try:
             with torch.cuda.device(get_cuda_device_string()):
                 torch.cuda.empty_cache()
@@ -139,9 +134,6 @@ def set_cuda_params():
             except Exception:
                 pass
     global dtype, dtype_vae, dtype_unet, unet_needs_upcast # pylint: disable=global-statement
-    if shared.cmd_opts.use_directml and not shared.cmd_opts.experimental: # TODO DirectML does not have full autocast capabilities
-        shared.opts.no_half = True
-        shared.opts.no_half_vae = True
     if shared.opts.cuda_dtype == 'FP32':
         dtype = torch.float32
         dtype_vae = torch.float32
@@ -175,8 +167,12 @@ def set_cuda_params():
 args = cmd_args.parser.parse_args()
 if args.use_ipex or (hasattr(torch, 'xpu') and torch.xpu.is_available()):
     backend = 'ipex'
+    from modules.ipex_specific import ipex_init
+    ipex_init()
 elif args.use_directml:
     backend = 'directml'
+    from modules.dml import directml_init
+    directml_init()
 elif torch.cuda.is_available() and torch.version.cuda:
     backend = 'cuda'
 elif torch.cuda.is_available() and torch.version.hip:
@@ -185,75 +181,6 @@ elif sys.platform == 'darwin':
     backend = 'mps'
 else:
     backend = 'cpu'
-
-if backend == 'ipex':
-    #Fix functions with ipex
-    torch.cuda.is_available = torch.xpu.is_available
-    torch.cuda.current_device = torch.xpu.current_device
-    torch.cuda.get_device_name = torch.xpu.get_device_name
-    torch.cuda.get_device_properties = torch.xpu.get_device_properties
-    torch.cuda.empty_cache = torch_gc
-
-    torch.cuda.memory_stats = torch.xpu.memory_stats
-    torch.cuda.mem_get_info = lambda device=None: [(torch.xpu.get_device_properties(device).total_memory - torch.xpu.memory_allocated(device)), torch.xpu.get_device_properties(device).total_memory]
-    torch.cuda.memory_allocated = torch.xpu.memory_allocated
-    torch.cuda.max_memory_allocated = torch.xpu.max_memory_allocated
-    torch.cuda.reset_peak_memory_stats = torch.xpu.reset_peak_memory_stats
-    torch.cuda.utilization = 0
-
-    torch.cuda.get_rng_state_all = torch.xpu.get_rng_state_all
-    torch.cuda.set_rng_state_all = torch.xpu.set_rng_state_all
-    try:
-        torch.cuda.amp.GradScaler = torch.xpu.amp.GradScaler
-    except Exception:
-        pass
-
-    from modules.sd_hijack_utils import CondFunc
-    #Functions with dtype errors:
-    CondFunc('torch.nn.modules.GroupNorm.forward',
-        lambda orig_func, *args, **kwargs: orig_func(args[0], args[1].to(args[0].weight.data.dtype)),
-        lambda *args, **kwargs: args[2].dtype != args[1].weight.data.dtype)
-    CondFunc('torch.nn.modules.Linear.forward',
-        lambda orig_func, *args, **kwargs: orig_func(args[0], args[1].to(args[0].weight.data.dtype)),
-        lambda *args, **kwargs: args[2].dtype != args[1].weight.data.dtype)
-    #Diffusers bfloat16:
-    CondFunc('torch.nn.modules.Conv2d._conv_forward',
-        lambda orig_func, *args, **kwargs: orig_func(args[0], args[1].to(args[2].data.dtype), args[2], args[3]),
-        lambda *args, **kwargs: args[2].dtype != args[3].data.dtype)
-
-    #Functions that does not work with the XPU:
-    #UniPC:
-    CondFunc('torch.linalg.solve',
-        lambda orig_func, *args, **kwargs: orig_func(args[0].to("cpu"), args[1].to("cpu")).to(get_cuda_device_string()),
-        lambda *args, **kwargs: args[1].device != torch.device("cpu"))
-    #SDE Samplers:
-    CondFunc('torch.Generator',
-        lambda orig_func, device: torch.xpu.Generator(device),
-        lambda orig_func, device: device != torch.device("cpu") and device != "cpu")
-    #Diffusers Float64 (ARC GPUs doesn't support double or Float64):
-    CondFunc('torch.from_numpy',
-        lambda orig_func, *args, **kwargs: orig_func(args[0].astype('float32')),
-        lambda *args, **kwargs: args[1].dtype == float)
-    #ControlNet:
-    CondFunc('torch.batch_norm',
-        lambda orig_func, *args, **kwargs: orig_func(args[0].to("cpu"),
-        args[1].to("cpu") if args[1] is not None else args[1],
-        args[2].to("cpu") if args[2] is not None else args[2],
-        args[3].to("cpu") if args[3] is not None else args[3],
-        args[4].to("cpu") if args[4] is not None else args[4],
-        args[5], args[6], args[7], args[8]).to(get_cuda_device_string()),
-        lambda *args, **kwargs: args[1].device != torch.device("cpu"))
-    CondFunc('torch.instance_norm',
-        lambda orig_func, *args, **kwargs: orig_func(args[0].to("cpu"),
-        args[1].to("cpu") if args[1] is not None else args[1],
-        args[2].to("cpu") if args[2] is not None else args[2],
-        args[3].to("cpu") if args[3] is not None else args[3],
-        args[4].to("cpu") if args[4] is not None else args[4],
-        args[5], args[6], args[7], args[8]).to(get_cuda_device_string()),
-        lambda *args, **kwargs: args[1].device != torch.device("cpu"))
-
-if backend == "directml":
-    directml_init()
 
 cuda_ok = torch.cuda.is_available() and not backend == 'ipex'
 cpu = torch.device("cpu")
@@ -306,7 +233,7 @@ def without_autocast(disable=False):
     if disable:
         return contextlib.nullcontext()
     if shared.cmd_opts.use_directml:
-        return torch.dml.amp.autocast(enabled=False) if torch.is_autocast_enabled() else contextlib.nullcontext()
+        return torch.dml.amp.autocast(enabled=False) if torch.is_autocast_enabled() else contextlib.nullcontext() # pylint: disable=unexpected-keyword-arg
     if backend == 'ipex':
         return torch.xpu.amp.autocast(enabled=False) if torch.is_autocast_enabled() else contextlib.nullcontext()
     if cuda_ok:

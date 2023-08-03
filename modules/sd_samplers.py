@@ -16,14 +16,14 @@ def list_samplers(backend_name = shared.backend):
     global samplers_for_img2img # pylint: disable=global-statement
     global samplers_map # pylint: disable=global-statement
     if backend_name == shared.Backend.ORIGINAL:
-        all_samplers = [*sd_samplers_kdiffusion.samplers_data_k_diffusion, *sd_samplers_compvis.samplers_data_compvis]
+        all_samplers = [*sd_samplers_compvis.samplers_data_compvis, *sd_samplers_kdiffusion.samplers_data_k_diffusion]
     else:
         all_samplers = [*sd_samplers_diffusers.samplers_data_diffusers]
     all_samplers_map = {x.name: x for x in all_samplers}
     samplers = all_samplers
     samplers_for_img2img = all_samplers
     samplers_map = {}
-    shared.log.debug(f'Enumerated samplers: {len(all_samplers)}')
+    shared.log.debug(f'Samplers enumerated: {[x.name for x in all_samplers]}')
 
 list_samplers()
 
@@ -37,6 +37,10 @@ def find_sampler_config(name):
 
 
 def create_sampler(name, model):
+    if name == 'Default' and hasattr(model, 'scheduler'):
+        config = {k: v for k, v in model.scheduler.config.items() if not k.startswith('_')}
+        shared.log.debug(f'Sampler default {type(model.scheduler).__name__}: {config}')
+        return model.scheduler
     config = find_sampler_config(name)
     if config is None:
         shared.log.error(f'Attempting to use unknown sampler: {name}')
@@ -44,10 +48,15 @@ def create_sampler(name, model):
     if shared.backend == shared.Backend.ORIGINAL:
         sampler = config.constructor(model)
         sampler.config = config
+        sampler.name = name
+        shared.log.debug(f'Sampler: {sampler.name} {sampler.config.options}')
         return sampler
     elif shared.backend == shared.Backend.DIFFUSERS:
         sampler = config.constructor(model)
+        if not hasattr(model, 'scheduler_config'):
+            model.scheduler_config = sampler.sampler.config.copy()
         model.scheduler = sampler.sampler
+        shared.log.debug(f'Sampler: {sampler.name} {sampler.config}')
         return sampler.sampler
     else:
         return None

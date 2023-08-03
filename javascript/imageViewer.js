@@ -1,12 +1,12 @@
 // A full size 'lightbox' preview modal shown when left clicking on gallery previews
-let previewTimestamp = Date.now();
 let previewDrag = false;
 let modalPreviewZone;
+let previewInstance;
 
-function closeModal(force = false) {
+function closeModal(evt, force = false) {
   if (force) gradioApp().getElementById('lightboxModal').style.display = 'none';
   if (previewDrag) return;
-  if ((Date.now() - previewTimestamp) < 250) return;
+  if (evt?.button !== 0) return;
   gradioApp().getElementById('lightboxModal').style.display = 'none';
 }
 
@@ -49,7 +49,7 @@ function modalKeyHandler(event) {
       modalImageSwitch(1);
       break;
     case 'Escape':
-      closeModal(true);
+      closeModal(null, true);
       break;
   }
   event.stopPropagation();
@@ -59,12 +59,15 @@ function showModal(event) {
   const source = event.target || event.srcElement;
   const modalImage = gradioApp().getElementById('modalImage');
   const lb = gradioApp().getElementById('lightboxModal');
-  modalImage.onload = () => modalPreviewZone.focus();
+  lb.ownerSVGElement = modalImage;
+  modalImage.onload = () => {
+    previewInstance.moveTo(0, 0);
+    modalPreviewZone.focus();
+  };
   modalImage.src = source.src;
   if (modalImage.style.display === 'none') lb.style.setProperty('background-image', `url(${source.src})`);
   lb.style.display = 'flex';
   lb.onkeydown = modalKeyHandler;
-  previewTimestamp = Date.now();
   event.stopPropagation();
 }
 
@@ -86,18 +89,11 @@ function modalZoomSet(modalImage, enable) {
   if (modalImage) modalImage.classList.toggle('modalImageFullscreen', !!enable);
 }
 
-function setupImageForLightbox(e) {
-  if (e.dataset.modded) return;
-  e.dataset.modded = true;
-  e.style.cursor = 'pointer';
-  e.style.userSelect = 'none';
-  e.addEventListener('mousedown', (evt) => {
-    if (evt.button !== 0) return;
-    const initialZoom = (localStorage.getItem('modalZoom') || true) === 'yes';
-    modalZoomSet(gradioApp().getElementById('modalImage'), initialZoom);
-    evt.preventDefault();
-    showModal(evt);
-  }, true);
+function setupImageForLightbox(image) {
+  if (image.dataset.modded) return;
+  image.dataset.modded = 'true';
+  image.style.cursor = 'pointer';
+  image.style.userSelect = 'none';
 }
 
 function modalZoomToggle(event) {
@@ -120,29 +116,50 @@ function modalTileToggle(event) {
   event.stopPropagation();
 }
 
+function modalResetInstance(event) {
+  const modalImage = document.getElementById('modalImage');
+  previewInstance.dispose();
+  previewInstance = panzoom(modalImage, { zoomSpeed: 0.05, minZoom: 0.1, maxZoom: 5.0, filterKey: (/* e, dx, dy, dz */) => true });
+}
+
 let imageViewerInitialized = false;
 
+function galleryClickEventHandler(event) {
+  if (event.button !== 0) return;
+  if (event.target.nodeName === 'IMG' && !event.target.parentNode.classList.contains('thumbnail-item')) {
+    const initialZoom = (localStorage.getItem('modalZoom') || true) === 'yes';
+    modalZoomSet(gradioApp().getElementById('modalImage'), initialZoom);
+    event.preventDefault();
+    showModal(event);
+  }
+}
+
 function initImageViewer() {
-  const fullImgPreview = gradioApp().querySelectorAll('.gradio-gallery > div > img');
-  if (fullImgPreview.length > 0) fullImgPreview.forEach(setupImageForLightbox);
+  // Each tab has its own gradio-gallery
+  const galleryPreviews = gradioApp().querySelectorAll('.gradio-gallery > div.preview');
+  if (galleryPreviews.length > 0) {
+    for (const galleryPreview of galleryPreviews) {
+      const fullImgPreview = galleryPreview.querySelectorAll('img');
+      if (fullImgPreview.length > 0) {
+        galleryPreview.addEventListener('click', galleryClickEventHandler, true);
+        fullImgPreview.forEach(setupImageForLightbox);
+      }
+    }
+  }
   if (imageViewerInitialized) return;
   imageViewerInitialized = true;
 
   // main elements
   const modal = document.createElement('div');
   modal.id = 'lightboxModal';
-  // modal.addEventListener('keydown', modalKeyHandler, true);
 
   modalPreviewZone = document.createElement('div');
   modalPreviewZone.className = 'lightboxModalPreviewZone';
 
   const modalImage = document.createElement('img');
   modalImage.id = 'modalImage';
-  // modalImage.addEventListener('keydown', modalKeyHandler, true);
   modalPreviewZone.appendChild(modalImage);
-  panzoom(modalImage, {
-    zoomSpeed: 0.05, minZoom: 0.25, maxZoom: 4.0, filterKey: (/* e, dx, dy, dz */) => true,
-  });
+  previewInstance = panzoom(modalImage, { zoomSpeed: 0.05, minZoom: 0.1, maxZoom: 5.0, filterKey: (/* e, dx, dy, dz */) => true });
 
   // toolbar
   const modalZoom = document.createElement('span');
@@ -151,6 +168,13 @@ function initImageViewer() {
   modalZoom.innerHTML = '🔍';
   modalZoom.title = 'Toggle zoomed view';
   modalZoom.addEventListener('click', modalZoomToggle, true);
+
+  const modalReset = document.createElement('span');
+  modalReset.id = 'modal_reset';
+  modalReset.className = 'cursor';
+  modalReset.innerHTML = '♻️';
+  modalReset.title = 'Reset zoomed view';
+  modalReset.addEventListener('click', modalResetInstance, true);
 
   const modalTile = document.createElement('span');
   modalTile.id = 'modal_tile';
@@ -178,7 +202,7 @@ function initImageViewer() {
   modalClose.className = 'cursor';
   modalClose.innerHTML = '🗙';
   modalClose.title = 'Close';
-  modalClose.addEventListener('click', closeModal, true);
+  modalClose.addEventListener('click', (evt) => closeModal(evt, true), true);
 
   // handlers
   modalPreviewZone.addEventListener('mousedown', () => { previewDrag = false; });
@@ -186,8 +210,8 @@ function initImageViewer() {
   modalPreviewZone.addEventListener('mousemove', () => { previewDrag = true; });
   modalPreviewZone.addEventListener('touchmove', () => { previewDrag = true; }, { passive: true });
   modalPreviewZone.addEventListener('scroll', () => { previewDrag = true; });
-  modalPreviewZone.addEventListener('mouseup', () => closeModal());
-  modalPreviewZone.addEventListener('touchend', () => closeModal());
+  modalPreviewZone.addEventListener('mouseup', (evt) => closeModal(evt));
+  modalPreviewZone.addEventListener('touchend', (evt) => closeModal(evt));
 
   const modalPrev = document.createElement('a');
   modalPrev.className = 'modalPrev';
@@ -210,6 +234,7 @@ function initImageViewer() {
   modal.appendChild(modalNext);
   modal.append(modalControls);
   modalControls.appendChild(modalZoom);
+  modalControls.appendChild(modalReset);
   modalControls.appendChild(modalTile);
   modalControls.appendChild(modalSave);
   modalControls.appendChild(modalDownload);

@@ -5,7 +5,7 @@ from io import BytesIO
 from typing import List, Dict, Any
 from threading import Lock
 from secrets import compare_digest
-from fastapi import APIRouter, Depends, FastAPI
+from fastapi import FastAPI, APIRouter, Depends
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.exceptions import HTTPException
 from PIL import PngImagePlugin,Image
@@ -132,6 +132,7 @@ class Api:
         self.add_api_route("/sdapi/v1/prompt-styles", self.get_prompt_styles, methods=["GET"], response_model=List[models.PromptStyleItem])
         self.add_api_route("/sdapi/v1/embeddings", self.get_embeddings, methods=["GET"], response_model=models.EmbeddingsResponse)
         self.add_api_route("/sdapi/v1/refresh-checkpoints", self.refresh_checkpoints, methods=["POST"])
+        self.add_api_route("/sdapi/v1/refresh-vaes", self.refresh_vaes, methods=["POST"])
         self.add_api_route("/sdapi/v1/create/embedding", self.create_embedding, methods=["POST"], response_model=models.CreateResponse)
         self.add_api_route("/sdapi/v1/create/hypernetwork", self.create_hypernetwork, methods=["POST"], response_model=models.CreateResponse)
         self.add_api_route("/sdapi/v1/preprocess", self.preprocess, methods=["POST"], response_model=models.PreprocessResponse)
@@ -143,7 +144,7 @@ class Api:
         self.add_api_route("/sdapi/v1/reload-checkpoint", self.reloadapi, methods=["POST"])
         self.add_api_route("/sdapi/v1/scripts", self.get_scripts_list, methods=["GET"], response_model=models.ScriptsList)
         self.add_api_route("/sdapi/v1/script-info", self.get_script_info, methods=["GET"], response_model=List[models.ScriptInfo])
-        self.add_api_route("/sdapi/v1/log", self.get_log_buffer, methods=["GET"], response_model=List)
+        self.add_api_route("/sdapi/v1/log", self.get_log_buffer, methods=["GET"], response_model=List) # bypass auth
         self.default_script_arg_txt2img = []
         self.default_script_arg_img2img = []
 
@@ -157,7 +158,6 @@ class Api:
             if compare_digest(credentials.password, self.credentials[credentials.username]):
                 return True
         raise HTTPException(status_code=401, detail="Unauthorized", headers={"WWW-Authenticate": "Basic"})
-
 
     def get_log_buffer(self, req: models.LogRequest = Depends()):
         lines = shared.log.buffer[:req.lines] if req.lines > 0 else shared.log.buffer.copy()
@@ -434,9 +434,11 @@ class Api:
         return options
 
     def set_config(self, req: Dict[str, Any]):
+        updated = []
         for k, v in req.items():
-            shared.opts.set(k, v)
+            updated.append({ k: shared.opts.set(k, v) })
         shared.opts.save(shared.config_filename)
+        return { "updated": updated }
 
     def get_cmd_flags(self):
         return vars(shared.cmd_opts)
@@ -497,7 +499,10 @@ class Api:
         }
 
     def refresh_checkpoints(self):
-        shared.refresh_checkpoints()
+        return shared.refresh_checkpoints()
+
+    def refresh_vaes(self):
+        return shared.refresh_vaes()
 
     def create_embedding(self, args: dict):
         try:
@@ -583,13 +588,8 @@ class Api:
 
     def shutdown(self):
         shared.log.info('Shutdown request received')
-        # from modules.shared import demo
-        # demo.close()
-        # time.sleep(0.5)
-        # import sys
-        # sys.exit(0)
-        import os
-        os._exit(0)
+        import sys
+        sys.exit(0)
 
     def get_memory(self):
         try:
