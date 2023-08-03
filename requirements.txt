@@ -4,6 +4,7 @@ aiohttp
 anyio
 appdirs
 astunparse
+# FIXME: bitsandbytes doesn't work with gfx1100 yet
 bitsandbytes
 blendmodes
 clean-fid

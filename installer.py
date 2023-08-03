@@ -317,6 +317,7 @@ def check_torch():
         hip_visible_devices = []
         for idx, gpu in enumerate(amd_gpus):
             if gpu in ['gfx1100', 'gfx1101', 'gfx1102']:
+                # use the first match for now
                 hip_visible_devices.append(str(idx))
                 break
         if len(hip_visible_devices) > 0:
@@ -335,8 +336,9 @@ def check_torch():
             torch_command = os.environ.get('TORCH_COMMAND', f'torch torchvision --pre --index-url https://download.pytorch.org/whl/nightly/rocm{rocm_ver}')
         else:
             torch_command = os.environ.get('TORCH_COMMAND', 'torch==2.0.1 torchvision==0.15.2 --index-url https://download.pytorch.org/whl/rocm5.4.2')
-
-        os.environ.setdefault('TENSORFLOW_PACKAGE', 'tensorflow-rocm')
+        # importing tensorflow-rocm before calling torch methods will make torch core dump on Navi 3x
+        # https://github.com/vladmandic/automatic/issues/1929
+        # os.environ.setdefault('TENSORFLOW_PACKAGE', 'tensorflow-rocm')
         xformers_package = os.environ.get('XFORMERS_PACKAGE', 'none')
     elif allow_ipex and (args.use_ipex or shutil.which('sycl-ls') is not None or os.environ.get('ONEAPI_ROOT') is not None or os.path.exists('/opt/intel/oneapi')):
         args.use_ipex = True # pylint: disable=attribute-defined-outside-init
