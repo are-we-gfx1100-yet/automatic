@@ -25,7 +25,7 @@ lmdb
 lpips
 omegaconf
 open-clip-torch
-opencv-contrib-python
+opencv-contrib-python-headless
 piexif
 psutil
 pyyaml
@@ -49,7 +49,7 @@ antlr4-python3-runtime==4.9.3
 requests==2.31.0
 tqdm==4.65.0
 accelerate==0.19.0
-opencv-python==4.7.0.72
+opencv-python-headless==4.7.0.72
 diffusers==0.10.2
 einops==0.4.1
 gradio==3.32.0
