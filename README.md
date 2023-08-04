@@ -17,6 +17,8 @@
 
 This is a fork of [SD:Next](https://github.com/vladmandic/automatic) with the goal of providing the best out-of-box experience for Navi 31 (and Navi 3x).
 
+See [What is this?](https://github.com/are-we-gfx1100-yet/automatic/discussions/1) for detail.
+
 ## Top-13 Features (10 wasn't enough)
 
 All Individual features are not listed here, instead check [ChangeLog](CHANGELOG.md) for full list of changes.
