@@ -15,8 +15,7 @@
 
 </div>
 
-This project started as a fork from [Automatic1111 WebUI](https://github.com/AUTOMATIC1111/stable-diffusion-webui/) and it grew significantly since then,  
-but although it diverged considerably, any substantial features to original work is ported to this repository as well.
+This is a fork of [SD:Next](https://github.com/vladmandic/automatic) with the goal of providing the best out-of-box experience for Navi 31 (and Navi 3x).
 
 ## Top-13 Features (10 wasn't enough)
 
