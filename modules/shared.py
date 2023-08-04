@@ -336,7 +336,7 @@ elif devices.backend == "ipex":
 elif devices.backend == "directml":
     cross_attention_optimization_default = "Sub-quadratic"
 elif devices.backend == "rocm":
-    cross_attention_optimization_default = "Sub-quadratic"
+    cross_attention_optimization_default = "Doggettx's"
 else: # cuda
     cross_attention_optimization_default ="Scaled-Dot-Product"
 
