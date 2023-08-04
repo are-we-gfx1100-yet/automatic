@@ -333,7 +333,7 @@ def check_torch():
         rocm_ver = f'{major_ver}.{minor_ver}'
         log.debug(f'Detected ROCm version: {rocm_ver}')
         if rocm_ver in ['5.5', '5.6']:
-            torch_command = os.environ.get('TORCH_COMMAND', f'torch torchvision --pre --index-url https://download.pytorch.org/whl/nightly/rocm{rocm_ver}')
+            torch_command = os.environ.get('TORCH_COMMAND', f'torchvision --pre --index-url https://download.pytorch.org/whl/nightly/rocm{rocm_ver}')
         else:
             torch_command = os.environ.get('TORCH_COMMAND', 'torch==2.0.1 torchvision==0.15.2 --index-url https://download.pytorch.org/whl/rocm5.4.2')
         # importing tensorflow-rocm before calling torch methods will make torch core dump on Navi 3x
