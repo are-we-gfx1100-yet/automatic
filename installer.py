@@ -81,7 +81,7 @@ def setup_logging():
     }))
     logging.basicConfig(level=logging.ERROR, format='%(asctime)s | %(name)s | %(levelname)s | %(module)s | %(message)s', handlers=[logging.NullHandler()]) # redirect default logger to null
     pretty_install(console=console)
-    traceback_install(console=console, extra_lines=1, width=console.width, word_wrap=False, indent_guides=False, suppress=[])
+    traceback_install(console=console, extra_lines=1, max_frames=10, width=console.width, word_wrap=False, indent_guides=False, suppress=[])
     while log.hasHandlers() and len(log.handlers) > 0:
         log.removeHandler(log.handlers[0])
 
@@ -166,8 +166,9 @@ def pip(arg: str, ignore: bool = False, quiet: bool = False):
     arg = arg.replace('>=', '==')
     if not quiet:
         log.info(f'Installing package: {arg.replace("install", "").replace("--upgrade", "").replace("--no-deps", "").replace("--force", "").replace("  ", " ").strip()}')
-    log.debug(f"Running pip: {arg}")
-    result = subprocess.run(f'"{sys.executable}" -m pip {arg}', shell=True, check=False, env=os.environ, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    env_args = os.environ.get("PIP_EXTRA_ARGS", "")
+    log.debug(f"Running pip: {arg} {env_args}")
+    result = subprocess.run(f'"{sys.executable}" -m pip {arg} {env_args}', shell=True, check=False, env=os.environ, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     txt = result.stdout.decode(encoding="utf8", errors="ignore")
     if len(result.stderr) > 0:
         txt += ('\n' if len(txt) > 0 else '') + result.stderr.decode(encoding="utf8", errors="ignore")
@@ -353,7 +354,7 @@ def check_torch():
             torch_command = os.environ.get('TORCH_COMMAND', 'torch==2.0.1a0 torchvision==0.15.2a0 intel_extension_for_pytorch==2.0.110+xpu -f https://developer.intel.com/ipex-whl-stable-xpu')
             os.environ.setdefault('TENSORFLOW_PACKAGE', 'tensorflow==2.13.0 intel-extension-for-tensorflow[gpu]')
         else:
-            torch_command = os.environ.get('TORCH_COMMAND', 'torch==2.0.0a0 torchvision intel_extension_for_pytorch==2.0.110+gitba7f6c1 -f https://developer.intel.com/ipex-whl-stable-xpu')
+            torch_command = os.environ.get('TORCH_COMMAND', 'torch==2.0.0a0 torchvision==0.15.2a0 intel_extension_for_pytorch==2.0.110+gitba7f6c1 -f https://developer.intel.com/ipex-whl-stable-xpu')
     else:
         machine = platform.machine()
         if sys.platform == 'darwin':
@@ -408,7 +409,7 @@ def check_torch():
     try:
         if 'xformers' in xformers_package:
             install(f'--no-deps {xformers_package}', ignore=True)
-        else:
+        elif not args.experimental:
             x = pkg_resources.working_set.by_key.get('xformers', None)
             if x is not None:
                 log.warning(f'Not used, uninstalling: {x}')
@@ -453,8 +454,17 @@ def install_packages():
     install(invisiblewatermark_package, 'invisible-watermark')
     install('onnxruntime==1.15.1', 'onnxruntime', ignore=True)
     install('pi-heif', 'pi_heif', ignore=True)
-    tensorflow_package = os.environ.get('TENSORFLOW_PACKAGE', 'tensorflow==2.12.0')
+    install('git+https://github.com/damian0815/compel', 'compel', ignore=True)
+    tensorflow_package = os.environ.get('TENSORFLOW_PACKAGE', 'tensorflow==2.13.0')
     install(tensorflow_package, 'tensorflow', ignore=True)
+    bitsandbytes_package = os.environ.get('BITSANDBYTES_PACKAGE', None)
+    if bitsandbytes_package is not None:
+        install(bitsandbytes_package, 'bitsandbytes', ignore=True)
+    elif not args.experimental:
+        bitsandbytes_package = pkg_resources.working_set.by_key.get('bitsandbytes', None)
+        if bitsandbytes_package is not None:
+            log.warning(f'Not used, uninstalling: {bitsandbytes_package}')
+            pip('uninstall bitsandbytes --yes --quiet', ignore=True, quiet=True)
     if args.profile:
         print_profile(pr, 'Packages')
 

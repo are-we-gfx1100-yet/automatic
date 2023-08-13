@@ -4,8 +4,6 @@ aiohttp
 anyio
 appdirs
 astunparse
-# FIXME: bitsandbytes doesn't work with gfx1100 yet
-bitsandbytes
 blendmodes
 clean-fid
 easydev
@@ -42,7 +40,6 @@ voluptuous
 yapf
 scikit-image
 basicsr
-compel
 fasteners
 typing-extensions==4.7.1
 antlr4-python3-runtime==4.9.3
@@ -53,9 +50,10 @@ opencv-python-headless==4.7.0.72
 diffusers==0.10.2
 einops==0.4.1
 gradio==3.32.0
+huggingface_hub==0.16.4
 numexpr==2.8.4
-numpy==1.23.5
-numba==0.57.0
+numpy==1.24.4
+numba==0.57.1
 pandas==1.5.3
 protobuf==3.20.3
 pytorch_lightning==1.9.4

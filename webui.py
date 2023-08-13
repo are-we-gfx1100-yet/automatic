@@ -9,6 +9,7 @@ import logging
 import warnings
 import importlib
 from threading import Thread
+import urllib3
 from modules import timer, errors, paths # pylint: disable=unused-import
 
 startup_timer = timer.Timer()
@@ -17,9 +18,15 @@ local_url = None
 errors.log.debug('Loading Torch')
 import torch # pylint: disable=C0411
 try:
+    rnd = torch.sum(torch.randn(2, 2)).to(0)
+    errors.log.debug(f'Torch init: {rnd / rnd == 1.0}') # fix silly pytorch_lightning issue
+except Exception:
+    pass
+try:
     import intel_extension_for_pytorch as ipex # pylint: disable=import-error, unused-import
 except Exception:
     pass
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 import torchvision # pylint: disable=W0611,C0411
 import pytorch_lightning # pytorch_lightning should be imported after torch, but it re-enables warnings on import so import once to disable them # pylint: disable=W0611,C0411
 if ".dev" in torch.__version__ or "+git" in torch.__version__:
@@ -104,6 +111,9 @@ def initialize():
     log.debug('Entering initialize')
     shared.disable_extensions()
     check_rollback_vae()
+
+    modules.sd_samplers.list_samplers()
+    startup_timer.record("samplers")
 
     modules.sd_vae.refresh_vae_list()
     startup_timer.record("vae")
