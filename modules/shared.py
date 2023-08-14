@@ -364,7 +364,7 @@ options_templates.update(options_section(('optimizations', "Optimizations"), {
     "sub_quad_chunk_threshold": OptionInfo(80, "Sub-quadratic cross-attention chunking threshold", gr.Slider, {"minimum": 0, "maximum": 100, "step": 1}),
     "token_merging_ratio": OptionInfo(0.0, "Token merging ratio", gr.Slider, {"minimum": 0.0, "maximum": 0.9, "step": 0.1}),
     "token_merging_ratio_img2img": OptionInfo(0.0, "Token merging ratio for img2img", gr.Slider, {"minimum": 0.0, "maximum": 0.9, "step": 0.1}),
-    "token_merging_ratio_hr": OptionInfo(0.0, "Token merging ratio for hires pass", gr.Slider, {"minimum": 0.0, "maximum": 0.9, "step": 0.1}),
+    "token_merging_ratio_hr": OptionInfo(0.3, "Token merging ratio for hires pass", gr.Slider, {"minimum": 0.0, "maximum": 0.9, "step": 0.1}),
     "sd_vae_sliced_encode": OptionInfo(False, "Enable splitting of hires batch processing"),
 }))
 
@@ -446,7 +446,7 @@ options_templates.update(options_section(('saving-images', "Image Options"), {
     "directories_max_prompt_words": OptionInfo(8, "Max prompt words for [prompt_words] pattern", gr.Slider, {"minimum": 1, "maximum": 99, "step": 1, **hide_dirs}),
     "save_images_add_number": OptionInfo(True, "Add number to filename when saving", component_args=hide_dirs),
     "samples_save_zip": OptionInfo(True, "Create zip archive when downloading multiple images"),
-    "grid_save": OptionInfo(True, "Always save all generated image grids"),
+    "grid_save": OptionInfo(False, "Always save all generated image grids"),
     "grid_format": OptionInfo('jpg', 'File format for grids', gr.Dropdown, lambda: {"choices": ["jpg", "png", "webp", "tiff", "jp2"]}),
     "grid_extended_filename": OptionInfo(True, "Add extended info (seed, prompt) to filename when saving grid"),
     "grid_only_if_multiple": OptionInfo(True, "Do not save grids consisting of one picture"),
@@ -499,7 +499,7 @@ options_templates.update(options_section(('ui', "User Interface"), {
     "gradio_theme": OptionInfo("black-orange", "UI theme", gr.Dropdown, lambda: {"choices": list_themes()}, refresh=refresh_themes),
     "theme_style": OptionInfo("Auto", "Theme mode", gr.Radio, {"choices": ["Auto", "Dark", "Light"]}),
     "tooltips": OptionInfo("UI Tooltips", "UI tooltips", gr.Radio, {"choices": ["None", "Browser default", "UI tooltips"]}),
-    "return_grid": OptionInfo(True, "Show grid in results for web"),
+    "return_grid": OptionInfo(False, "Show grid in results for web"),
     "return_mask": OptionInfo(False, "For inpainting, include the greyscale mask in results for web"),
     "return_mask_composite": OptionInfo(False, "For inpainting, include masked composite in results for web"),
     "disable_weights_auto_swap": OptionInfo(True, "Do not change selected model when reading generation parameters"),
@@ -517,7 +517,7 @@ options_templates.update(options_section(('ui', "User Interface"), {
 
 options_templates.update(options_section(('live-preview', "Live Previews"), {
     "show_progressbar": OptionInfo(True, "Show progressbar"),
-    "live_previews_enable": OptionInfo(True, "Show live previews of the created image"),
+    "live_previews_enable": OptionInfo(False, "Show live previews of the created image"),
     "show_progress_grid": OptionInfo(True, "Show previews of all images generated in a batch as a grid"),
     "notification_audio_enable": OptionInfo(False, "Play a sound when images are finished generating"),
     "notification_audio_path": OptionInfo("html/notification.mp3","Path to notification sound", component_args=hide_dirs),
