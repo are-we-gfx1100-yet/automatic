@@ -1,6 +1,8 @@
 import inspect
 import typing
 import torch
+# import numpy as np
+# from PIL import Image
 import modules.devices as devices
 import modules.shared as shared
 import modules.sd_samplers as sd_samplers
@@ -27,31 +29,59 @@ def process_diffusers(p: StableDiffusionProcessing, seeds, prompts, negative_pro
         shared.state.sampling_steps = p.steps
         shared.state.current_latent = latents
 
-    def vae_decode(latents, model, output_type='np'):
-        if hasattr(model, 'vae') and torch.is_tensor(latents):
-            if latents.shape[0] == 0:
-                shared.log.error(f'VAE nothing to decode: {latents.shape}')
-                return []
-            shared.log.debug(f'Diffusers VAE decode: name={sd_vae.loaded_vae_file} dtype={model.vae.dtype} upcast={model.vae.config.get("force_upcast", None)} images={latents.shape[0]}')
-            if shared.opts.diffusers_move_unet and not model.has_accelerate:
-                shared.log.debug('Diffusers: Moving UNet to CPU')
-                unet_device = model.unet.device
-                model.unet.to(devices.cpu)
-                devices.torch_gc()
-            latents.to(model.vae.device)
-            decoded = model.vae.decode(latents / model.vae.config.scaling_factor, return_dict=False)[0]
-            imgs = model.image_processor.postprocess(decoded, output_type=output_type)
-            if shared.opts.diffusers_move_unet and not model.has_accelerate:
-                model.unet.to(unet_device)
-            return imgs
-        else:
+    def hires_resize(latents):
+        return latents # TODO finish hires
+        if p.hr_upscaler == 'None':
             return latents
+        scale = shared.latent_upscale_modes.get(p.hr_upscaler, None)
+        if scale is not None:
+            p.init_hr()
+            p.ops.append('hires')
+            shared.log.info(f'Diffusers Hires: upscaler={p.hr_upscaler} mode={scale["mode"]} antialias={scale["antialias"]} width={p.hr_upscale_to_x} height={p.hr_upscale_to_y} images={latents.shape[0]}')
+            hires_image = torch.nn.functional.interpolate(latents, size=(p.hr_upscale_to_y // 8, p.hr_upscale_to_x // 8), mode=scale["mode"], antialias=scale["antialias"])
+        else:
+            shared.log.warning(f'Diffusers hires unsupported: upscaler={p.hr_upscaler} supported=latent modes')
+            hires_image = latents
+        return hires_image
 
-    def taesd_vae_decode(latents, model, output_type='np'):
-        shared.log.debug('Diffusers VAE decode: name=TAESD')
+    def full_vae_decode(latents, model):
+        shared.log.debug(f'Diffusers VAE decode: name={sd_vae.loaded_vae_file if sd_vae.loaded_vae_file is not None else "baked"} dtype={model.vae.dtype} upcast={model.vae.config.get("force_upcast", None)} images={latents.shape[0]}')
+        if shared.opts.diffusers_move_unet and not model.has_accelerate:
+            shared.log.debug('Diffusers: Moving UNet to CPU')
+            unet_device = model.unet.device
+            model.unet.to(devices.cpu)
+            devices.torch_gc()
+        latents.to(model.vae.device)
+        decoded = model.vae.decode(latents / model.vae.config.scaling_factor, return_dict=False)[0]
+        if shared.opts.diffusers_move_unet and not model.has_accelerate:
+            model.unet.to(unet_device)
+        return decoded
+
+    def taesd_vae_decode(latents):
+        shared.log.debug(f'Diffusers VAE decode: name=TAESD images={latents.shape[0]}')
         decoded = torch.zeros((len(latents), 3, p.height, p.width), dtype=devices.dtype_vae, device=devices.device)
         for i in range(len(output.images)):
             decoded[i] = (sd_vae_taesd.decode(latents[i]) * 2.0) - 1.0
+        return decoded
+
+    def vae_decode(latents, model, output_type='np', full_quality=True):
+        if shared.state.interrupted or shared.state.skipped:
+            return []
+        if not hasattr(model, 'vae'):
+            shared.log.error('VAE not found in model')
+            return []
+        if not torch.is_tensor(latents):
+            shared.log.error(f'VAE input is not latents: {type(latents)}')
+            return []
+        if latents.shape[0] == 0:
+            shared.log.error(f'VAE nothing to decode: {latents.shape}')
+            return []
+        if p.enable_hr:
+            latents = hires_resize(latents=latents)
+        if full_quality:
+            decoded = full_vae_decode(latents=latents, model=shared.sd_model)
+        else:
+            decoded = taesd_vae_decode(latents=latents)
         imgs = model.image_processor.postprocess(decoded, output_type=output_type)
         return imgs
 
@@ -86,7 +116,7 @@ def process_diffusers(p: StableDiffusionProcessing, seeds, prompts, negative_pro
         negative_embed = None
         negative_pooled = None
         prompts, negative_prompts, prompts_2, negative_prompts_2 = fix_prompts(prompts, negative_prompts, prompts_2, negative_prompts_2)
-        if shared.opts.data['prompt_attention'] in {'Compel parser', 'Full parser'}:
+        if shared.opts.prompt_attention in {'Compel parser', 'Full parser'}:
             prompt_embed, pooled, negative_embed, negative_pooled = prompt_parser_diffusers.compel_encode_prompts(model,
                                                                                                                   prompts,
                                                                                                                   negative_prompts,
@@ -160,6 +190,14 @@ def process_diffusers(p: StableDiffusionProcessing, seeds, prompts, negative_pro
         if sampler is None:
             sampler = sd_samplers.all_samplers_map.get("UniPC")
         sd_samplers.create_sampler(sampler.name, shared.sd_model) # TODO(Patrick): For wrapped pipelines this is currently a no-op
+        sampler_options = f'type:{shared.opts.schedulers_prediction_type} ' if shared.opts.schedulers_prediction_type != 'default' else ''
+        sampler_options += 'no_karras ' if not shared.opts.schedulers_use_karras else ''
+        sampler_options += 'no_low_order' if not shared.opts.schedulers_use_loworder else ''
+        sampler_options += 'dynamic_thresholding' if shared.opts.schedulers_use_thresholding else ''
+        sampler_options += f'solver:{shared.opts.schedulers_dpm_solver}' if shared.opts.schedulers_dpm_solver != 'sde-dpmsolver++' else ''
+        sampler_options += f'beta:{shared.opts.schedulers_beta_schedule}:{shared.opts.schedulers_beta_start}:{shared.opts.schedulers_beta_end}' if shared.opts.schedulers_beta_schedule != 'default' else ''
+        p.extra_generation_params['Sampler options'] = sampler_options if len(sampler_options) > 0 else None
+        p.extra_generation_params['Pipeline'] = shared.sd_model.__class__.__name__
 
     cross_attention_kwargs={}
     if len(getattr(p, 'init_images', [])) > 0:
@@ -201,23 +239,25 @@ def process_diffusers(p: StableDiffusionProcessing, seeds, prompts, negative_pro
         clip_skip=p.clip_skip,
         **task_specific_kwargs
     )
+    p.extra_generation_params['CFG rescale'] = p.diffusers_guidance_rescale
+    p.extra_generation_params["Eta DDIM"] = shared.opts.eta_ddim if shared.opts.eta_ddim is not None and shared.opts.eta_ddim > 0 else None
     output = shared.sd_model(**pipe_args) # pylint: disable=not-callable
     if shared.state.interrupted or shared.state.skipped:
         unload_diffusers_lora()
         return results
 
-    if shared.sd_refiner is None or not p.enable_hr:
-        output.images = vae_decode(output.images, shared.sd_model) if p.full_quality else taesd_vae_decode(output.images, shared.sd_model)
-
     if lora_state['active']:
+        p.extra_generation_params['Lora method'] = shared.opts.diffusers_lora_loader
         unload_diffusers_lora()
 
-    if refiner_enabled:
-        for i in range(len(output.images)):
+    if not refiner_enabled:
+        results = vae_decode(latents=output.images, model=shared.sd_model, full_quality=p.full_quality)
+    else:
+        for i in range(len(output.images)): # save images before refiner
             if shared.opts.save and not p.do_not_save_samples and shared.opts.save_images_before_refiner and hasattr(shared.sd_model, 'vae'):
                 from modules.processing import create_infotext
                 info=create_infotext(p, p.all_prompts, p.all_seeds, p.all_subseeds, [], iteration=p.iteration, position_in_batch=i)
-                decoded = vae_decode(output.images, shared.sd_model, output_type='pil')
+                decoded = vae_decode(latents=output.images, model=shared.sd_model, output_type='pil', full_quality=p.full_quality)
                 for i in range(len(decoded)):
                     images.save_image(decoded[i], path=p.outpath_samples, basename="", seed=seeds[i], prompt=prompts[i], extension=shared.opts.samples_format, info=info, p=p, suffix="-before-refiner")
 
@@ -256,18 +296,17 @@ def process_diffusers(p: StableDiffusionProcessing, seeds, prompts, negative_pro
                 clip_skip=p.clip_skip,
             )
             refiner_output = shared.sd_refiner(**pipe_args) # pylint: disable=not-callable
+            p.extra_generation_params['Image CFG scale'] = p.image_cfg_scale if p.image_cfg_scale is not None else None
+            p.extra_generation_params['Refiner start'] = p.refiner_start
+            p.extra_generation_params["Hires steps"] = p.hr_second_pass_steps
+
             if not shared.state.interrupted and not shared.state.skipped:
-                refiner_images = vae_decode(refiner_output.images, shared.sd_refiner)
+                refiner_images = vae_decode(latents=refiner_output.images, model=shared.sd_refiner, full_quality=True)
                 results.append(refiner_images[0])
 
         if shared.opts.diffusers_move_refiner and not shared.sd_refiner.has_accelerate:
             shared.log.debug('Diffusers: Moving refiner model to CPU')
             shared.sd_refiner.to(devices.cpu)
             devices.torch_gc()
-    else:
-        results = output.images
-
-    if p.is_hr_pass:
-        shared.log.warning('Diffusers not implemented: hires fix')
 
     return results
